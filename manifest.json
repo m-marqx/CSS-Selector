@@ -1,0 +1,23 @@
+{
+    "manifest_version": 3,
+    "name": "CSS Selector Helper",
+    "version": "0.9",
+    "description": "Chrome Extension for web scraping: capture and test CSS selectors.",
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ],
+    "permissions": [
+        "activeTab",
+        "scripting"
+    ]
+}

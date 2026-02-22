@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            width: 320px;
+            padding: 12px;
+            margin: 0;
+            color: #333;
+        }
+
+        h3 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        p {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+
+        .section {
+            border-top: 1px solid #eaeaea;
+            margin-top: 12px;
+            padding-top: 12px;
+        }
+
+        h4 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+        }
+
+        #hierarchy {
+            font-size: 12px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .class-item {
+            padding: 4px;
+            margin-bottom: 2px;
+            border-radius: 3px;
+        }
+
+        .class-item:hover {
+            background-color: #e3efef;
+        }
+
+        .empty-state {
+            color: #999;
+            font-style: italic;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+
+        #paint-all {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 2px 5px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 4px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            user-select: none;
+            border: 1px solid transparent;
+            transition: all 0.1s;
+        }
+
+        .chip:hover {
+            background: #d0d0d0;
+            border-color: #999;
+        }
+
+        .chip.ignored {
+            text-decoration: line-through;
+            color: #999;
+            background: #ffe6e6;
+            border-color: #ffcccc;
+        }
+
+        .item-controls {
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        .item-controls button {
+            background: transparent;
+            color: #007bff;
+            border: none;
+            padding: 0 4px;
+            font-size: 10px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .item-controls button:hover {
+            background: transparent;
+            color: #0056b3;
+        }
+
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <h3>CSS Selector Helper</h3>
+        <div style="display: flex; gap: 4px;">
+            <button id="always-on-top" class="btn-secondary"
+                style="padding: 3px 6px; font-size: 11px; margin-top: -2px; display: none;">📌 Stay on Top</button>
+            <button id="pin-popup" class="btn-secondary" style="padding: 3px 6px; font-size: 11px; margin-top: -2px;">📌
+                Pin Window</button>
+        </div>
+    </div>
+    <div style="margin-bottom: 8px;">
+        <label style="font-size: 12px; display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="text-mode-checkbox" style="margin:0 6px 0 0;" />
+            <b>Text Selection Mode</b>&nbsp;(target what you highlight)
+        </label>
+    </div>
+    <p style="margin-bottom: 4px; margin-top: 0;">Click on any element in the page to capture its class hierarchy.</p>
+    <p style="margin-top: 0; font-size: 11px; color: #888;">💡 Click on the class name chips below to ignore them from
+        the selector (great for auto-generated classes).</p>
+
+    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button id="global-select-all" class="btn-secondary" style="flex: 1; font-size: 11px; padding: 4px;">Select All
+            Elements</button>
+        <button id="global-deselect-all" class="btn-secondary" style="flex: 1; font-size: 11px; padding: 4px;">Ignore
+            All Elements</button>
+    </div>
+
+    <div id="hierarchy">
+        <div class="empty-state">No element selected. Ensure you are on a valid webpage.</div>
+    </div>
+
+    <div class="section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0;">Path Select</h4>
+            <button id="copy-path" class="btn-secondary" style="padding: 3px 8px; font-size: 11px;">Copy</button>
+        </div>
+        <textarea id="path-select" rows="3"
+            placeholder="Generated CSS Path will appear here. Edit manually before storing..."></textarea>
+    </div>
+
+    <div class="section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0;">Multi Context</h4>
+            <div style="display: flex; gap: 4px;">
+                <button id="store-path" class="btn-secondary" style="padding: 3px 8px; font-size: 11px;">Store
+                    Path</button>
+                <button id="reset-multi-path" class="btn-secondary"
+                    style="padding: 3px 8px; font-size: 11px;">Reset</button>
+                <button id="copy-multi-path" class="btn-secondary"
+                    style="padding: 3px 8px; font-size: 11px;">Copy</button>
+            </div>
+        </div>
+        <div id="multi-path-display" contenteditable="true"
+            style="width: 100%; box-sizing: border-box; overflow-y: auto; max-height: 80px; min-height: 48px; font-family: Consolas, monospace; font-size: 11px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; line-height: 1.4; word-break: break-all; cursor: text; outline: none;">
+            <span style="color: #999; font-style: italic;">Multiple CSS paths concatenated here...</span>
+        </div>
+        <textarea id="multi-path-select" style="position: absolute; left: -9999px;" tabindex="-1" readonly></textarea>
+        <button id="paint-multi" style="width: 100%; margin-top: 8px;">Highlight Multi Context Paths</button>
+    </div>
+
+    <div class="section">
+        <h4>Paint Context</h4>
+        <button id="paint-all">Paint Stored Elements (Active Classes)</button>
+    </div>
+
+    <div class="section" style="margin-bottom: 12px;">
+        <h4>Test Custom Selector</h4>
+        <div class="input-group">
+            <input type="text" id="custom-selector" placeholder=".wrapper > .item" />
+            <button id="test-selector">Test</button>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
