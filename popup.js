@@ -1,42 +1,58 @@
 let currentTabId = null;
 let capturedHierarchy = [];
-let ignoredClasses = new Set(); // Stores strings of ignored auto-generated classes
+let ignoredClasses = new Set();
 let multiPaths = [];
+
+function updateToggleVisual(checked) {
+    const wrapper = document.getElementById("setup-toggle-wrapper");
+    if (wrapper) wrapper.classList.toggle("setup-toggle--active", checked);
+}
+
+function showToast(message, duration = 1800) {
+    const toast = document.getElementById("toast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add("toast--visible");
+    setTimeout(() => { toast.classList.remove("toast--visible"); }, duration);
+}
 
 async function init() {
     let tabId = null;
 
-    // Check if we are running in a detached window
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has('tabId')) {
-        tabId = parseInt(urlParams.get('tabId'), 10);
+    const isEmbedded = urlParams.has("embedded");
 
-        // Setup popup window state
-        document.getElementById('pin-popup').style.display = 'none';
-        const aotBtn = document.getElementById('always-on-top');
-        aotBtn.style.display = 'inline-block';
+    if (urlParams.has("tabId")) {
 
-        let isAlwaysOnTop = urlParams.get('aot') === 'true';
-        aotBtn.textContent = isAlwaysOnTop ? "✅ Pinned to Top" : "📌 Stay on Top";
+        tabId = parseInt(urlParams.get("tabId"), 10);
 
-        // Enforce the always on top state immediately
-        chrome.windows.getCurrent((win) => {
-            chrome.windows.update(win.id, { alwaysOnTop: isAlwaysOnTop });
-        });
 
-        // Toggle state when clicked
-        aotBtn.addEventListener('click', () => {
-            isAlwaysOnTop = !isAlwaysOnTop;
-            chrome.windows.getCurrent((win) => {
-                chrome.windows.update(win.id, { alwaysOnTop: isAlwaysOnTop });
-            });
-            aotBtn.textContent = isAlwaysOnTop ? "✅ Pinned to Top" : "📌 Stay on Top";
-        });
+        document.getElementById("dock-to-page").style.display = "none";
+
     } else {
-        // Get active tab in normal popup mode
+
+        document.getElementById("dock-to-page").addEventListener("click", () => {
+            if (!currentTabId) {
+                showToast("No active page connection");
+                return;
+            }
+            const popupUrl = chrome.runtime.getURL("popup.html");
+            const ignoredArr = Array.from(ignoredClasses).join(",");
+            chrome.tabs.sendMessage(currentTabId, {
+                action: "injectOverlay",
+                position: "bottom-right",
+                url: `${popupUrl}?tabId=${currentTabId}&ignored=${encodeURIComponent(ignoredArr)}&embedded=true`
+            });
+            window.close();
+        });
+
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://")) {
-            document.getElementById("hierarchy").innerHTML = "<div class='empty-state'>Cannot be used on this page.</div>";
+            document.getElementById("hierarchy").innerHTML =
+                `<div class="hierarchy-tree__empty">
+                    <span class="hierarchy-tree__empty-icon" aria-hidden="true">⚠️</span>
+                    <span class="hierarchy-tree__empty-text">Cannot be used on this page.</span>
+                </div>`;
             return;
         }
         tabId = tab.id;
@@ -44,44 +60,60 @@ async function init() {
 
     currentTabId = tabId;
 
-    // Send a regular heartbeat to keep content.js 'active' capturing clicks
-    setInterval(() => {
+
+    function sendHeartbeat() {
         chrome.tabs.sendMessage(currentTabId, { action: "heartbeat" }).catch(() => { });
-    }, 800);
-    chrome.tabs.sendMessage(currentTabId, { action: "heartbeat" }).catch(() => { });
+    }
+    sendHeartbeat();
+    setTimeout(sendHeartbeat, 100);
+    setTimeout(sendHeartbeat, 300);
+    setTimeout(sendHeartbeat, 600);
+    setInterval(sendHeartbeat, 800);
 
-    // Proactively ask content script if it already has a cache loaded
-    chrome.tabs.sendMessage(currentTabId, { action: "getStatus" }, (response) => {
-        if (chrome.runtime.lastError) return; // ignore connection errors while warming up
-        if (response) {
-            if (response.textSelectionMode) {
-                document.getElementById("text-mode-checkbox").checked = true;
-            }
-            if (response.hierarchy && response.hierarchy.length > 0) {
-                capturedHierarchy = response.hierarchy;
-                renderHierarchy();
-            }
-            if (response.multiPaths) {
-                multiPaths = response.multiPaths;
-                renderMultiPaths();
-            }
-        }
 
-        // Recover ignored classes from detached window URL params
-        if (urlParams.has('ignored')) {
-            const passedIgnored = urlParams.get('ignored');
-            if (passedIgnored) {
-                passedIgnored.split(',').forEach(c => ignoredClasses.add(c));
-                renderHierarchy();
+    function fetchStatus() {
+        chrome.tabs.sendMessage(currentTabId, { action: "getStatus" }, (response) => {
+            if (chrome.runtime.lastError) return;
+            if (response) {
+                if (response.textSelectionMode) {
+                    document.getElementById("text-mode-checkbox").checked = true;
+                    updateToggleVisual(true);
+                }
+                if (response.hierarchy && response.hierarchy.length > 0) {
+                    capturedHierarchy = response.hierarchy;
+                    renderHierarchy();
+                }
+                if (response.multiPaths) {
+                    multiPaths = response.multiPaths;
+                    renderMultiPaths();
+                }
             }
-        }
-    });
 
-    document.getElementById("text-mode-checkbox").addEventListener("change", (e) => {
+
+            if (urlParams.has("ignored")) {
+                const passedIgnored = urlParams.get("ignored");
+                if (passedIgnored) {
+                    passedIgnored.split(",").forEach(c => ignoredClasses.add(c));
+                    renderHierarchy();
+                }
+            }
+        });
+    }
+    fetchStatus();
+
+    if (isEmbedded) {
+        setTimeout(fetchStatus, 500);
+        setTimeout(fetchStatus, 1200);
+    }
+
+
+    const textModeCB = document.getElementById("text-mode-checkbox");
+    textModeCB.addEventListener("change", (e) => {
+        updateToggleVisual(e.target.checked);
         chrome.tabs.sendMessage(currentTabId, { action: "setTextSelectionMode", enabled: e.target.checked });
     });
 
-    // Listen for messages from the content script (clicked elements tracking)
+
     chrome.runtime.onMessage.addListener((msg, sender) => {
         if (msg.action === "elementClicked" && sender.tab && sender.tab.id === currentTabId) {
             capturedHierarchy = msg.hierarchy;
@@ -89,62 +121,46 @@ async function init() {
         }
     });
 
-    // UI Event Listeners
-    document.getElementById("paint-all").addEventListener("click", () => {
-        if (capturedHierarchy.length === 0) return;
 
-        // Construct a selector from all captured classes (excluding ignored ones)
+    document.getElementById("paint-all").addEventListener("click", handlePaintAll);
+
+    function handlePaintAll() {
+        if (capturedHierarchy.length === 0) return;
         const selectors = capturedHierarchy
             .map(item => {
                 const valid = item.classes ? item.classes.split(/\s+/).filter(c => c && !ignoredClasses.has(c)) : [];
                 return valid.length > 0 ? "." + valid.map(c => CSS.escape(c)).join(".") : null;
             })
-            .filter(s => s !== null); // Removing any levels that became entirely ignored
+            .filter(s => s !== null);
 
         if (selectors.length > 0) {
-            chrome.tabs.sendMessage(currentTabId, {
-                action: "paint",
-                selector: selectors.join(", ")
-            });
+            chrome.tabs.sendMessage(currentTabId, { action: "paint", selector: selectors.join(", ") });
+            showToast("Painting " + selectors.length + " selector(s)");
         } else {
-            alert("No classes left to paint because they are all ignored or empty.");
+            showToast("No classes left to paint");
         }
-    });
+    }
 
-    document.getElementById("test-selector").addEventListener("click", () => {
+
+    document.getElementById("test-selector").addEventListener("click", handleTestSelector);
+
+    function handleTestSelector() {
         const selector = document.getElementById("custom-selector").value.trim();
         if (selector) {
-            chrome.tabs.sendMessage(currentTabId, {
-                action: "paint",
-                selector: selector
-            });
+            chrome.tabs.sendMessage(currentTabId, { action: "paint", selector });
+            showToast("Testing selector");
         }
-    });
+    }
+
 
     document.getElementById("copy-path").addEventListener("click", () => {
         const ta = document.getElementById("path-select");
         ta.select();
-        document.execCommand('copy'); // Fallback for simple popup context
-        const copyBtn = document.getElementById("copy-path");
-        const originalText = copyBtn.textContent;
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = originalText; }, 1500);
+        document.execCommand("copy");
+        showToast("Path copied to clipboard");
     });
 
-    document.getElementById("pin-popup").addEventListener("click", () => {
-        // Pass the tab connection AND the ignored classes over to the pinned window
-        const ignoredArr = Array.from(ignoredClasses).join(',');
 
-        chrome.windows.create({
-            url: `popup.html?tabId=${currentTabId}&ignored=${encodeURIComponent(ignoredArr)}&aot=true`,
-            type: "panel",
-            width: 380,
-            height: 640
-        });
-        window.close(); // Close the current disappearing popup
-    });
-
-    // Global Select All / Ignore All Listeners
     document.getElementById("global-select-all").addEventListener("click", () => {
         ignoredClasses.clear();
         renderHierarchy();
@@ -153,21 +169,20 @@ async function init() {
     document.getElementById("global-deselect-all").addEventListener("click", () => {
         capturedHierarchy.forEach(item => {
             if (item.classes) {
-                item.classes.split(/\s+/).forEach(c => {
-                    if (c) ignoredClasses.add(c);
-                });
+                item.classes.split(/\s+/).forEach(c => { if (c) ignoredClasses.add(c); });
             }
         });
         renderHierarchy();
     });
 
-    // Multi Context Event Listeners
+
     document.getElementById("store-path").addEventListener("click", () => {
         const selector = document.getElementById("path-select").value.trim();
         if (selector && !multiPaths.includes(selector)) {
             multiPaths.push(selector);
             chrome.tabs.sendMessage(currentTabId, { action: "storeMultiPath", path: selector });
             renderMultiPaths();
+            showToast("Path stored");
         }
     });
 
@@ -175,33 +190,27 @@ async function init() {
         multiPaths = [];
         chrome.tabs.sendMessage(currentTabId, { action: "resetMultiPath" });
         renderMultiPaths();
+        showToast("Multi context cleared");
     });
 
     document.getElementById("copy-multi-path").addEventListener("click", () => {
         const ta = document.getElementById("multi-path-select");
         ta.select();
-        document.execCommand('copy');
-        const copyBtn = document.getElementById("copy-multi-path");
-        const originalText = copyBtn.textContent;
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = originalText; }, 1500);
+        document.execCommand("copy");
+        showToast("Multi paths copied");
     });
 
     document.getElementById("paint-multi").addEventListener("click", () => {
         if (multiPaths.length > 0) {
-            chrome.tabs.sendMessage(currentTabId, {
-                action: "paintMulti",
-                paths: multiPaths
-            });
+            chrome.tabs.sendMessage(currentTabId, { action: "paintMulti", paths: multiPaths });
+            showToast("Highlighting " + multiPaths.length + " path(s)");
         }
     });
 
     document.getElementById("multi-path-display").addEventListener("blur", (e) => {
-        // Parse the manual user string modifications out of the visible display
         let rawText = e.target.textContent;
         if (rawText.trim() === "Multiple CSS paths concatenated here...") return;
-
-        let paths = rawText.split(',').map(s => s.trim()).filter(s => s);
+        let paths = rawText.split(",").map(s => s.trim()).filter(s => s);
         multiPaths = paths;
         chrome.tabs.sendMessage(currentTabId, { action: "updateMultiPaths", paths: multiPaths });
         renderMultiPaths();
@@ -212,22 +221,19 @@ function updatePathSelect() {
     let pathParts = [];
     let lastWasSkipped = false;
 
-    // Reverse because hierarchy is [target, parent, grandparent, ... body]
     for (let i = capturedHierarchy.length - 1; i >= 0; i--) {
         let item = capturedHierarchy[i];
         let tagName = item.tagName.toLowerCase();
         let validClasses = item.classes ? item.classes.split(/\s+/).filter(c => c && !ignoredClasses.has(c)) : [];
 
-        // Skip unimportant wrappers unless it's the target element itself
         if (i !== 0 && validClasses.length === 0 && (tagName === "div" || tagName === "span" || tagName === "body" || tagName === "html")) {
             lastWasSkipped = true;
-            continue; // Skip this unidentifiable parent node
+            continue;
         }
 
         let classStr = validClasses.map(c => `.${CSS.escape(c)}`).join("");
         let selStr = tagName + classStr;
 
-        // Apply Sibling Relationship logic if the user selected + or ~
         if (item.siblingRelation && item.prevSibling) {
             let sibValidClasses = item.prevSibling.classes ? item.prevSibling.classes.split(/\s+/).filter(c => c && !ignoredClasses.has(c)) : [];
             let sibClassStr = sibValidClasses.map(c => `.${CSS.escape(c)}`).join("");
@@ -236,7 +242,6 @@ function updatePathSelect() {
         }
 
         if (pathParts.length > 0) {
-            // " > " enforces direct child. But if we skipped intermediate parents, they are now descendants, requiring " ".
             pathParts.push(lastWasSkipped ? " " : " > ");
         }
         pathParts.push(selStr);
@@ -245,7 +250,11 @@ function updatePathSelect() {
 
     let finalSelector = pathParts.join("");
     document.getElementById("path-select").value = finalSelector;
-    document.getElementById("custom-selector").value = finalSelector; // Also auto-fill the tester
+    document.getElementById("custom-selector").value = finalSelector;
+
+
+    const badge = document.getElementById("path-badge");
+    if (badge) badge.style.display = finalSelector ? "inline-flex" : "none";
 }
 
 function renderHierarchy() {
@@ -253,58 +262,70 @@ function renderHierarchy() {
     container.innerHTML = "";
 
     if (capturedHierarchy.length === 0) {
-        container.innerHTML = "<div class='empty-state'>No element selected.</div>";
+        container.innerHTML = `<div class="hierarchy-tree__empty">
+            <span class="hierarchy-tree__empty-icon" aria-hidden="true">🔍</span>
+            <span class="hierarchy-tree__empty-text">No element selected. Click an element on the page.</span>
+        </div>`;
         return;
     }
 
     capturedHierarchy.forEach((item, index) => {
-        const div = document.createElement("div");
-        div.className = "class-item";
+        const node = document.createElement("div");
+        node.className = "hierarchy-node" + (index === 0 ? " hierarchy-node--target" : "");
 
         const tagName = item.tagName.toLowerCase();
 
-        const label = document.createElement("span");
-        label.style.fontWeight = "bold";
-        label.textContent = (index === 0 ? "Target: " : "Parent: ") + tagName;
-        div.appendChild(label);
+
+        const header = document.createElement("div");
+        header.className = "hierarchy-node__header";
+
+        const tagLabel = document.createElement("span");
+        tagLabel.className = "hierarchy-node__tag";
+        tagLabel.innerHTML =
+            `<span class="hierarchy-node__tag-role">${index === 0 ? "Target" : "Parent"}</span>` +
+            `<span class="hierarchy-node__tag-name">${tagName}</span>`;
+        header.appendChild(tagLabel);
 
         if (item.classes) {
             let classList = item.classes.split(/\s+/).filter(c => c);
 
-            // Per-element Select All / Ignore All controls
+
             if (classList.length > 1) {
-                const controlsContainer = document.createElement("div");
-                controlsContainer.className = "item-controls";
+                const controls = document.createElement("div");
+                controls.className = "hierarchy-node__controls";
 
                 const selectAllBtn = document.createElement("button");
-                selectAllBtn.textContent = "(Select All)";
+                selectAllBtn.className = "btn btn--link btn--sm";
+                selectAllBtn.textContent = "Select All";
                 selectAllBtn.addEventListener("click", () => {
                     classList.forEach(c => ignoredClasses.delete(c));
                     renderHierarchy();
                 });
 
                 const ignoreAllBtn = document.createElement("button");
-                ignoreAllBtn.textContent = "(Ignore All)";
+                ignoreAllBtn.className = "btn btn--link btn--sm";
+                ignoreAllBtn.textContent = "Ignore All";
                 ignoreAllBtn.addEventListener("click", () => {
                     classList.forEach(c => ignoredClasses.add(c));
                     renderHierarchy();
                 });
 
-                controlsContainer.appendChild(selectAllBtn);
-                controlsContainer.appendChild(ignoreAllBtn);
-                div.appendChild(controlsContainer);
+                controls.appendChild(selectAllBtn);
+                controls.appendChild(ignoreAllBtn);
+                header.appendChild(controls);
             }
 
-            // Line break before chips
-            div.appendChild(document.createElement("br"));
+            node.appendChild(header);
+
+
+            const chipsContainer = document.createElement("div");
+            chipsContainer.className = "hierarchy-node__chips";
 
             classList.forEach(c => {
                 const chip = document.createElement("span");
-                // If the class is ignored, add the 'ignored' stylesheet class
                 chip.className = "chip" + (ignoredClasses.has(c) ? " ignored" : "");
                 chip.textContent = `.${c}`;
 
-                // Toggle ignored status onclick
                 chip.addEventListener("click", (e) => {
                     e.stopPropagation();
                     if (ignoredClasses.has(c)) {
@@ -312,31 +333,28 @@ function renderHierarchy() {
                     } else {
                         ignoredClasses.add(c);
                     }
-                    // Re-render UI and path select
                     renderHierarchy();
                 });
-                div.appendChild(chip);
+                chipsContainer.appendChild(chip);
             });
+
+            node.appendChild(chipsContainer);
+        } else {
+            node.appendChild(header);
         }
 
-        // Render Sibling Controller
+
         if (item.prevSibling) {
-            const siblingDiv = document.createElement("div");
-            siblingDiv.style.marginTop = "6px";
-            siblingDiv.style.padding = "4px 6px";
-            siblingDiv.style.background = "#eef2f5";
-            siblingDiv.style.borderRadius = "4px";
-            siblingDiv.style.fontSize = "11px";
+            const sibDiv = document.createElement("div");
+            sibDiv.className = "sibling-anchor";
 
             const relLabel = document.createElement("span");
-            relLabel.textContent = "Anchored to Sibling: ";
-            siblingDiv.appendChild(relLabel);
+            relLabel.className = "sibling-anchor__label";
+            relLabel.textContent = "Sibling Anchor:";
+            sibDiv.appendChild(relLabel);
 
             const relSelect = document.createElement("select");
-            relSelect.style.fontSize = "10px";
-            relSelect.style.border = "1px solid #ccc";
-            relSelect.style.borderRadius = "3px";
-            relSelect.style.cursor = "pointer";
+            relSelect.className = "sibling-anchor__select";
             relSelect.innerHTML = `
                 <option value="">Off</option>
                 <option value="+" ${item.siblingRelation === '+' ? 'selected' : ''}>+ Adjacent</option>
@@ -346,24 +364,22 @@ function renderHierarchy() {
                 item.siblingRelation = e.target.value;
                 updatePathSelect();
             });
-            siblingDiv.appendChild(relSelect);
+            sibDiv.appendChild(relSelect);
 
             const sibTarget = document.createElement("span");
+            sibTarget.className = "sibling-anchor__target";
             let sibValidClasses = item.prevSibling.classes ? item.prevSibling.classes.split(/\s+/).filter(c => c && !ignoredClasses.has(c)) : [];
             let sibClassStr = sibValidClasses.map(c => `.${c}`).join("");
-            sibTarget.textContent = ` ${item.prevSibling.tagName}${sibClassStr}`;
-            sibTarget.style.marginLeft = "6px";
-            sibTarget.style.color = "#666";
-            sibTarget.style.wordBreak = "break-all";
-            siblingDiv.appendChild(sibTarget);
+            sibTarget.textContent = `${item.prevSibling.tagName}${sibClassStr}`;
+            sibDiv.appendChild(sibTarget);
 
-            div.appendChild(siblingDiv);
+            node.appendChild(sibDiv);
         }
 
-        container.appendChild(div);
+        container.appendChild(node);
     });
 
-    // Recompile path whenever we render hierarchy
+
     updatePathSelect();
 }
 
@@ -376,34 +392,38 @@ function renderMultiPaths() {
 
     displayContainer.innerHTML = "";
 
-    const colors = ["#ef4444", "#3b82f6", "#22c55e"]; // red, blue, green
+    const colors = [
+        "hsl(220, 90%, 55%)",
+        "hsl(150, 70%, 42%)",
+        "hsl(340, 75%, 55%)",
+        "hsl(35,  90%, 52%)",
+        "hsl(270, 70%, 55%)",
+    ];
 
     if (multiPaths.length === 0) {
-        displayContainer.innerHTML = '<span style="color: #999; font-style: italic;">Multiple CSS paths concatenated here...</span>';
+        displayContainer.innerHTML = '<span class="multi-path-display__placeholder">Multiple CSS paths concatenated here...</span>';
         return;
     }
 
     multiPaths.forEach((path, index) => {
-        let hexColor = "";
+        let hexColor;
         if (index < colors.length) {
             hexColor = colors[index];
         } else {
-            // Predictable random-ish based on path string to stop flashing
             let hash = 0;
             for (let i = 0; i < path.length; i++) hash = path.charCodeAt(i) + ((hash << 5) - hash);
-            hexColor = "#" + (hash & 0x00FFFFFF).toString(16).padStart(6, '0');
+            hexColor = "hsl(" + (Math.abs(hash) % 360) + ", 65%, 50%)";
         }
 
         const span = document.createElement("span");
         span.style.color = hexColor;
-        span.style.fontWeight = "bold";
+        span.style.fontWeight = "600";
         span.textContent = path;
-
         displayContainer.appendChild(span);
 
         if (index < multiPaths.length - 1) {
             const comma = document.createElement("span");
-            comma.style.color = "#333";
+            comma.style.color = "var(--text-tertiary)";
             comma.textContent = ", ";
             displayContainer.appendChild(comma);
         }
