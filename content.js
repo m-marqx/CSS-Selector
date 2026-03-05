@@ -241,7 +241,12 @@ function moveOverlayPanel(position) {
 
 
 
+function isOverlayEvent(target) {
+    return overlayContainer && (overlayContainer === target || overlayContainer.contains(target));
+}
+
 document.addEventListener("click", (e) => {
+    if (isOverlayEvent(e.target)) return;
     if (isActive || recentlyClosed) {
         e.preventDefault();
         e.stopPropagation();
@@ -289,7 +294,7 @@ function captureHierarchy(startingElement) {
 
 
 document.addEventListener("mousedown", (e) => {
-
+    if (isOverlayEvent(e.target)) return;
     if (!isActive && !recentlyClosed) return;
     if (isTextSelectionMode) return;
 
@@ -298,6 +303,7 @@ document.addEventListener("mousedown", (e) => {
 
 
 document.addEventListener("mouseup", (e) => {
+    if (isOverlayEvent(e.target)) return;
     if (!isActive && !recentlyClosed) return;
     if (!isTextSelectionMode) return;
 
