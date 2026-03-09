@@ -3,10 +3,7 @@ let capturedHierarchy = [];
 let ignoredClasses = new Set();
 let multiPaths = [];
 
-function updateToggleVisual(checked) {
-    const wrapper = document.getElementById("setup-toggle-wrapper");
-    if (wrapper) wrapper.classList.toggle("setup-toggle--active", checked);
-}
+
 
 function showToast(message, duration = 1800) {
     const toast = document.getElementById("toast");
@@ -23,10 +20,7 @@ async function init() {
     const isEmbedded = urlParams.has("embedded");
 
     if (urlParams.has("tabId")) {
-
         tabId = parseInt(urlParams.get("tabId"), 10);
-
-
         document.getElementById("dock-to-page").style.display = "none";
 
     } else {
@@ -60,7 +54,6 @@ async function init() {
 
     currentTabId = tabId;
 
-
     function sendHeartbeat() {
         chrome.tabs.sendMessage(currentTabId, { action: "heartbeat" }).catch(() => { });
     }
@@ -69,7 +62,6 @@ async function init() {
     setTimeout(sendHeartbeat, 300);
     setTimeout(sendHeartbeat, 600);
     setInterval(sendHeartbeat, 800);
-
 
     function ignoreAllClasses(hierarchy) {
         ignoredClasses.clear();
@@ -86,7 +78,6 @@ async function init() {
             if (response) {
                 if (response.textSelectionMode) {
                     document.getElementById("text-mode-checkbox").checked = true;
-                    updateToggleVisual(true);
                 }
                 if (response.hierarchy && response.hierarchy.length > 0) {
                     capturedHierarchy = response.hierarchy;
@@ -98,7 +89,6 @@ async function init() {
                     renderMultiPaths();
                 }
             }
-
 
             if (urlParams.has("ignored")) {
                 const passedIgnored = urlParams.get("ignored");
@@ -116,13 +106,10 @@ async function init() {
         setTimeout(fetchStatus, 1200);
     }
 
-
     const textModeCB = document.getElementById("text-mode-checkbox");
     textModeCB.addEventListener("change", (e) => {
-        updateToggleVisual(e.target.checked);
         chrome.tabs.sendMessage(currentTabId, { action: "setTextSelectionMode", enabled: e.target.checked });
     });
-
 
     chrome.runtime.onMessage.addListener((msg, sender) => {
         if (msg.action === "elementClicked" && sender.tab && sender.tab.id === currentTabId) {
@@ -131,7 +118,6 @@ async function init() {
             renderHierarchy();
         }
     });
-
 
     document.getElementById("paint-all").addEventListener("click", handlePaintAll);
 
@@ -152,7 +138,6 @@ async function init() {
         }
     }
 
-
     document.getElementById("test-selector").addEventListener("click", handleTestSelector);
 
     function handleTestSelector() {
@@ -163,14 +148,14 @@ async function init() {
         }
     }
 
-
     document.getElementById("copy-path").addEventListener("click", () => {
         const text = document.getElementById("path-select").value;
         navigator.clipboard.writeText(text).then(() => {
             showToast("Path copied to clipboard");
+        }).catch(() => {
+            showToast("Failed to copy");
         });
     });
-
 
     document.getElementById("global-select-all").addEventListener("click", () => {
         ignoredClasses.clear();
@@ -185,7 +170,6 @@ async function init() {
         });
         renderHierarchy();
     });
-
 
     document.getElementById("store-path").addEventListener("click", () => {
         const selector = document.getElementById("path-select").value.trim();
@@ -208,6 +192,8 @@ async function init() {
         const text = document.getElementById("multi-path-select").value;
         navigator.clipboard.writeText(text).then(() => {
             showToast("Multi paths copied");
+        }).catch(() => {
+            showToast("Failed to copy");
         });
     });
 
@@ -263,7 +249,6 @@ function updatePathSelect() {
     document.getElementById("path-select").value = finalSelector;
     document.getElementById("custom-selector").value = finalSelector;
 
-
     const badge = document.getElementById("path-badge");
     if (badge) badge.style.display = finalSelector ? "inline-flex" : "none";
 }
@@ -292,9 +277,16 @@ function renderHierarchy() {
 
         const tagLabel = document.createElement("span");
         tagLabel.className = "hierarchy-node__tag";
-        tagLabel.innerHTML =
-            `<span class="hierarchy-node__tag-role">${index === 0 ? "Target" : "Parent"}</span>` +
-            `<span class="hierarchy-node__tag-name">${tagName}</span>`;
+        const roleSpan = document.createElement("span");
+        roleSpan.className = "hierarchy-node__tag-role";
+        roleSpan.textContent = index === 0 ? "Target" : "Parent";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "hierarchy-node__tag-name";
+        nameSpan.textContent = tagName;
+
+        tagLabel.appendChild(roleSpan);
+        tagLabel.appendChild(nameSpan);
         header.appendChild(tagLabel);
 
         if (item.classes) {
@@ -417,17 +409,17 @@ function renderMultiPaths() {
     }
 
     multiPaths.forEach((path, index) => {
-        let hexColor;
+        let hslColor;
         if (index < colors.length) {
-            hexColor = colors[index];
+            hslColor = colors[index];
         } else {
             let hash = 0;
             for (let i = 0; i < path.length; i++) hash = path.charCodeAt(i) + ((hash << 5) - hash);
-            hexColor = "hsl(" + (Math.abs(hash) % 360) + ", 65%, 50%)";
+            hslColor = "hsl(" + (Math.abs(hash) % 360) + ", 65%, 50%)";
         }
 
         const span = document.createElement("span");
-        span.style.color = hexColor;
+        span.style.color = hslColor;
         span.style.fontWeight = "600";
         span.textContent = path;
         displayContainer.appendChild(span);
