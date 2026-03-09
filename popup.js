@@ -71,6 +71,15 @@ async function init() {
     setInterval(sendHeartbeat, 800);
 
 
+    function ignoreAllClasses(hierarchy) {
+        ignoredClasses.clear();
+        hierarchy.forEach(item => {
+            if (item.classes) {
+                item.classes.split(/\s+/).forEach(c => { if (c) ignoredClasses.add(c); });
+            }
+        });
+    }
+
     function fetchStatus() {
         chrome.tabs.sendMessage(currentTabId, { action: "getStatus" }, (response) => {
             if (chrome.runtime.lastError) return;
@@ -81,6 +90,7 @@ async function init() {
                 }
                 if (response.hierarchy && response.hierarchy.length > 0) {
                     capturedHierarchy = response.hierarchy;
+                    ignoreAllClasses(capturedHierarchy);
                     renderHierarchy();
                 }
                 if (response.multiPaths) {
@@ -117,6 +127,7 @@ async function init() {
     chrome.runtime.onMessage.addListener((msg, sender) => {
         if (msg.action === "elementClicked" && sender.tab && sender.tab.id === currentTabId) {
             capturedHierarchy = msg.hierarchy;
+            ignoreAllClasses(capturedHierarchy);
             renderHierarchy();
         }
     });
@@ -154,10 +165,10 @@ async function init() {
 
 
     document.getElementById("copy-path").addEventListener("click", () => {
-        const ta = document.getElementById("path-select");
-        ta.select();
-        document.execCommand("copy");
-        showToast("Path copied to clipboard");
+        const text = document.getElementById("path-select").value;
+        navigator.clipboard.writeText(text).then(() => {
+            showToast("Path copied to clipboard");
+        });
     });
 
 
@@ -194,10 +205,10 @@ async function init() {
     });
 
     document.getElementById("copy-multi-path").addEventListener("click", () => {
-        const ta = document.getElementById("multi-path-select");
-        ta.select();
-        document.execCommand("copy");
-        showToast("Multi paths copied");
+        const text = document.getElementById("multi-path-select").value;
+        navigator.clipboard.writeText(text).then(() => {
+            showToast("Multi paths copied");
+        });
     });
 
     document.getElementById("paint-multi").addEventListener("click", () => {
@@ -423,7 +434,7 @@ function renderMultiPaths() {
 
         if (index < multiPaths.length - 1) {
             const comma = document.createElement("span");
-            comma.style.color = "var(--text-tertiary)";
+            comma.style.color = "var(--text-muted)";
             comma.textContent = ", ";
             displayContainer.appendChild(comma);
         }
