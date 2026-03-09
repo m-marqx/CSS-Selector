@@ -21,7 +21,6 @@
     ],
     "permissions": [
         "activeTab",
-        "scripting",
         "tabs"
     ],
     "web_accessible_resources": [
