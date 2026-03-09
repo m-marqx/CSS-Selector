@@ -6,6 +6,7 @@ let cachedHierarchy = [];
 let isTextSelectionMode = false;
 let heartbeatTimer = null;
 let storedMultiPaths = [];
+let overlayListeners = [];
 
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -24,7 +25,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "paintMulti") {
         injectMultiStyles(request.paths);
     } else if (request.action === "getStatus") {
-        sendResponse({ isActive: isActive, hasCache: cachedHierarchy.length > 0, textSelectionMode: isTextSelectionMode, hierarchy: cachedHierarchy, multiPaths: storedMultiPaths });
+        sendResponse({ textSelectionMode: isTextSelectionMode, hierarchy: cachedHierarchy, multiPaths: storedMultiPaths });
     } else if (request.action === "setTextSelectionMode") {
         isTextSelectionMode = request.enabled;
     } else if (request.action === "storeMultiPath") {
@@ -37,10 +38,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         storedMultiPaths = request.paths || [];
     } else if (request.action === "injectOverlay") {
         injectOverlayPanel(request.url, request.position);
-    } else if (request.action === "removeOverlay") {
-        removeOverlayPanel();
-    } else if (request.action === "moveOverlay") {
-        moveOverlayPanel(request.position);
     }
 });
 
@@ -168,18 +165,23 @@ function injectOverlayPanel(url, position) {
         e.preventDefault();
     });
 
-    document.addEventListener("mousemove", (e) => {
+    const onDragMove = (e) => {
         if (!isDragging) return;
         wrapper.style.top = (e.clientY - dragOffsetY) + "px";
         wrapper.style.left = (e.clientX - dragOffsetX) + "px";
-    });
+    };
 
-    document.addEventListener("mouseup", () => {
+    const onDragUp = () => {
         if (isDragging) {
             isDragging = false;
             toolbar.style.cursor = "grab";
         }
-    });
+    };
+
+    document.addEventListener("mousemove", onDragMove);
+    document.addEventListener("mouseup", onDragUp);
+    overlayListeners.push({ type: "mousemove", handler: onDragMove });
+    overlayListeners.push({ type: "mouseup", handler: onDragUp });
 
     const iframe = document.createElement("iframe");
     iframe.src = url;
@@ -201,13 +203,20 @@ function injectOverlayPanel(url, position) {
         e.preventDefault();
         e.stopPropagation();
     });
-    document.addEventListener("mousemove", (e) => {
+
+    const onResizeMove = (e) => {
         if (!isResizing) return;
         const rect = wrapper.getBoundingClientRect();
         wrapper.style.width = Math.max(300, e.clientX - rect.left) + "px";
         wrapper.style.height = Math.max(400, e.clientY - rect.top) + "px";
-    });
-    document.addEventListener("mouseup", () => { isResizing = false; });
+    };
+
+    const onResizeUp = () => { isResizing = false; };
+
+    document.addEventListener("mousemove", onResizeMove);
+    document.addEventListener("mouseup", onResizeUp);
+    overlayListeners.push({ type: "mousemove", handler: onResizeMove });
+    overlayListeners.push({ type: "mouseup", handler: onResizeUp });
 
     wrapper.appendChild(toolbar);
     wrapper.appendChild(iframe);
@@ -217,29 +226,13 @@ function injectOverlayPanel(url, position) {
 }
 
 function removeOverlayPanel() {
-    if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
+    if (overlayContainer) {
+        overlayContainer.remove();
         overlayContainer = null;
     }
+    overlayListeners.forEach(({ type, handler }) => document.removeEventListener(type, handler));
+    overlayListeners = [];
 }
-
-function moveOverlayPanel(position) {
-    if (!overlayContainer) return;
-    const shadow = overlayContainer.shadowRoot;
-    if (!shadow) return;
-    const wrapper = shadow.getElementById("overlay-wrapper");
-    if (!wrapper) return;
-    const newPos = getPositionStyles(position);
-    wrapper.style.top = "auto";
-    wrapper.style.right = "auto";
-    wrapper.style.bottom = "auto";
-    wrapper.style.left = "auto";
-    wrapper.style.transform = "none";
-    Object.assign(wrapper.style, newPos);
-}
-
-
-
 
 function isOverlayEvent(target) {
     return overlayContainer && (overlayContainer === target || overlayContainer.contains(target));
@@ -253,13 +246,12 @@ document.addEventListener("click", (e) => {
     }
 }, true);
 
-function captureHierarchy(startingElement) {
+function buildHierarchyFromElement(startingElement) {
     const hierarchy = [];
     let currentElement = startingElement;
 
     while (currentElement && currentElement !== document.documentElement) {
         const tagName = currentElement.tagName.toLowerCase();
-
 
         const classes = currentElement.className && typeof currentElement.className === "string"
             ? currentElement.className.trim()
@@ -283,9 +275,11 @@ function captureHierarchy(startingElement) {
         currentElement = currentElement.parentElement;
     }
 
+    return hierarchy;
+}
 
-    cachedHierarchy = hierarchy;
-
+function captureHierarchy(startingElement) {
+    cachedHierarchy = buildHierarchyFromElement(startingElement);
 
     if (isActive) {
         chrome.runtime.sendMessage({ action: "elementClicked", hierarchy: cachedHierarchy }).catch(() => { });
@@ -367,26 +361,7 @@ document.addEventListener("mouseup", (e) => {
         let combinedClasses = classIntersection ? Array.from(classIntersection).join(" ") : "";
 
 
-        let hierarchy = [];
-        let currentElement = container;
-        while (currentElement && currentElement !== document.documentElement) {
-            const tagName = currentElement.tagName.toLowerCase();
-            const classes = currentElement.className && typeof currentElement.className === "string" ? currentElement.className.trim() : "";
-
-            let prev = currentElement.previousElementSibling;
-            let prevSiblingInfo = null;
-            if (prev) {
-                prevSiblingInfo = {
-                    tagName: prev.tagName.toLowerCase(),
-                    classes: prev.className && typeof prev.className === "string" ? prev.className.trim() : ""
-                };
-            }
-
-            hierarchy.push({ tagName, classes, prevSibling: prevSiblingInfo });
-            if (tagName === "body") break;
-            currentElement = currentElement.parentElement;
-        }
-
+        let hierarchy = buildHierarchyFromElement(container);
 
         hierarchy.unshift({ tagName: combinedTagName, classes: combinedClasses, prevSibling: null });
 
@@ -397,10 +372,19 @@ document.addEventListener("mouseup", (e) => {
     }, 10);
 });
 
+function isValidSelector(selector) {
+    try {
+        document.querySelector(selector);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function injectStyles(selector) {
     removeInjectedStyles();
 
-    if (!selector) return;
+    if (!selector || !isValidSelector(selector)) return;
 
     styleTag = document.createElement("style");
     styleTag.id = "css-helper-injected-style";
@@ -421,6 +405,9 @@ function injectMultiStyles(paths) {
 
     if (!paths || paths.length === 0) return;
 
+    const validPaths = paths.filter(p => isValidSelector(p));
+    if (validPaths.length === 0) return;
+
     styleTag = document.createElement("style");
     styleTag.id = "css-helper-injected-style";
 
@@ -431,7 +418,7 @@ function injectMultiStyles(paths) {
     ];
 
     let css = "";
-    paths.forEach((path, index) => {
+    validPaths.forEach((path, index) => {
         let bgColor = "";
         let outlineColor = "";
 
@@ -459,8 +446,8 @@ function injectMultiStyles(paths) {
 }
 
 function removeInjectedStyles() {
-    if (styleTag && styleTag.parentNode) {
-        styleTag.parentNode.removeChild(styleTag);
+    if (styleTag) {
+        styleTag.remove();
         styleTag = null;
     }
 }
